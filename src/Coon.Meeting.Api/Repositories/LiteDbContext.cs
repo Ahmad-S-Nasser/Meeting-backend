@@ -37,6 +37,7 @@ public class LiteDbContext : IDisposable
 
     public ILiteCollection<Tenant> Tenants => _db.GetCollection<Tenant>("tenants");
     public ILiteCollection<Models.Meeting> Meetings => _db.GetCollection<Models.Meeting>("meetings");
+    public ILiteCollection<WebhookDelivery> WebhookDeliveries => _db.GetCollection<WebhookDelivery>("webhookDeliveries");
 
     private void EnsureIndexes()
     {
@@ -45,6 +46,8 @@ public class LiteDbContext : IDisposable
         Meetings.EnsureIndex(m => m.TenantId);
         Meetings.EnsureIndex("idx_tenant_scheduled", "[$.TenantId, $.ScheduledAt]");
         Meetings.EnsureIndex("idx_reminder_due", "[$.ScheduledAt, $.ReminderSentAt, $.Status]");
+
+        WebhookDeliveries.EnsureIndex("idx_status_next_attempt", "[$.Status, $.NextAttemptAt]");
     }
 
     public void Dispose() => _db.Dispose();

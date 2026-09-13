@@ -26,14 +26,21 @@ builder.Services.AddSingleton<LiteDbContext>();
 
 builder.Services.AddSingleton<ITenantRepository, TenantRepository>();
 builder.Services.AddSingleton<IMeetingRepository, MeetingRepository>();
+builder.Services.AddSingleton<IWebhookDeliveryRepository, WebhookDeliveryRepository>();
 builder.Services.AddSingleton<IApiKeyService, ApiKeyService>();
 builder.Services.AddSingleton<IParticipantTokenService, ParticipantTokenService>();
+builder.Services.AddSingleton<IWebhookDispatcher, WebhookDispatcher>();
+builder.Services.AddSingleton<IIcsBuilder, IcsBuilder>();
+builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
+
+builder.Services.AddHttpClient("webhooks", c => c.Timeout = TimeSpan.FromSeconds(8));
 
 // Capture startup errors so a missing secret returns a clean 500 instead of leaking a stack
 // trace, matching SquadSpace's own Program.cs convention for the same class of failure.
 string? startupError = null;
 JwtSettings jwtSettings;
 TurnSettings turnSettings;
+SmtpSettings smtpSettings;
 
 try
 {
@@ -41,13 +48,18 @@ try
         ?? throw new InvalidOperationException("Jwt settings not configured.");
     turnSettings = builder.Configuration.GetSection("Turn").Get<TurnSettings>()
         ?? throw new InvalidOperationException("Turn settings not configured.");
+    smtpSettings = builder.Configuration.GetSection("Smtp").Get<SmtpSettings>()
+        ?? throw new InvalidOperationException("Smtp settings not configured.");
 
     // A hardcoded default participant-token signing key would let anyone mint a valid call
     // token for any meeting; failing to start is strictly better. The TURN shared secret is
     // the same story one layer down - without it call-credentials can't be minted at all, and
     // calling is core to this product, not an optional add-on the way it was in SquadSpace.
+    // Smtp:Password joins them for the same reason: without it, calendar invites silently never
+    // send rather than failing loudly at the one point someone could notice.
     RequireSecret(jwtSettings.ParticipantKey, "Jwt:ParticipantKey", "Jwt__ParticipantKey");
     RequireSecret(turnSettings.SharedSecret, "Turn:SharedSecret", "Turn__SharedSecret");
+    RequireSecret(smtpSettings.Password, "Smtp:Password", "Smtp__Password");
 
     static void RequireSecret(string value, string configKey, string envVar)
     {
@@ -65,10 +77,12 @@ catch (Exception ex)
     Console.WriteLine($"Startup Configuration Error: {ex.Message}\n{ex.StackTrace}");
     jwtSettings = new JwtSettings();
     turnSettings = new TurnSettings();
+    smtpSettings = new SmtpSettings { Host = "localhost" }; // SmtpClient's constructor rejects an empty host
 }
 
 builder.Services.AddSingleton(jwtSettings);
 builder.Services.AddSingleton(turnSettings);
+builder.Services.AddSingleton(smtpSettings);
 
 builder.Services.AddAuthentication(ApiKeyAuthenticationSchemeOptions.SchemeName)
     .AddScheme<ApiKeyAuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(
@@ -105,6 +119,8 @@ builder.Services.AddAuthentication(ApiKeyAuthenticationSchemeOptions.SchemeName)
     });
 
 builder.Services.AddAuthorization();
+
+builder.Services.AddHostedService<WebhookRetryHostedService>();
 
 builder.Services.AddSignalR(options =>
 {
