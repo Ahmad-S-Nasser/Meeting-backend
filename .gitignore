@@ -3,6 +3,9 @@
 ##
 ## Get latest from `dotnet new gitignore`
 
+# The embedded LiteDB database file - runtime data, not source.
+src/Coon.Meeting.Api/data/
+
 # dotenv files
 .env
 
