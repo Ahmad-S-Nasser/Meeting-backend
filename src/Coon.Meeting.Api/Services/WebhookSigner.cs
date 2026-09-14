@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Coon.Meeting.Api.Helpers;
 
 namespace Coon.Meeting.Api.Services;
 
@@ -33,15 +34,9 @@ public static class WebhookSigner
 
     /// <summary>
     /// Constant-time comparison, for an integrator (or our own tests) verifying a received
-    /// signature - ordinary string equality leaks a timing side-channel byte by byte.
+    /// signature - ordinary string equality leaks a timing side-channel byte by byte. Hex is
+    /// case-insensitive, so both sides are lowercased before the constant-time compare.
     /// </summary>
-    public static bool Matches(string? expected, string? received)
-    {
-        if (string.IsNullOrEmpty(expected) || string.IsNullOrEmpty(received)) return false;
-        if (expected.Length != received.Length) return false;
-
-        return CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(expected.ToLowerInvariant()),
-            Encoding.UTF8.GetBytes(received.ToLowerInvariant()));
-    }
+    public static bool Matches(string? expected, string? received) =>
+        SecretComparer.Equals(expected?.ToLowerInvariant(), received?.ToLowerInvariant());
 }

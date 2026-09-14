@@ -41,6 +41,7 @@ string? startupError = null;
 JwtSettings jwtSettings;
 TurnSettings turnSettings;
 SmtpSettings smtpSettings;
+AdminSettings adminSettings;
 
 try
 {
@@ -50,16 +51,21 @@ try
         ?? throw new InvalidOperationException("Turn settings not configured.");
     smtpSettings = builder.Configuration.GetSection("Smtp").Get<SmtpSettings>()
         ?? throw new InvalidOperationException("Smtp settings not configured.");
+    adminSettings = builder.Configuration.GetSection("Admin").Get<AdminSettings>()
+        ?? throw new InvalidOperationException("Admin settings not configured.");
 
     // A hardcoded default participant-token signing key would let anyone mint a valid call
     // token for any meeting; failing to start is strictly better. The TURN shared secret is
     // the same story one layer down - without it call-credentials can't be minted at all, and
     // calling is core to this product, not an optional add-on the way it was in SquadSpace.
     // Smtp:Password joins them for the same reason: without it, calendar invites silently never
-    // send rather than failing loudly at the one point someone could notice.
+    // send rather than failing loudly at the one point someone could notice. Admin:ProvisioningKey
+    // guards the one endpoint that mints new tenant API keys - a blank value there must not mean
+    // "provisioning is open to anyone".
     RequireSecret(jwtSettings.ParticipantKey, "Jwt:ParticipantKey", "Jwt__ParticipantKey");
     RequireSecret(turnSettings.SharedSecret, "Turn:SharedSecret", "Turn__SharedSecret");
     RequireSecret(smtpSettings.Password, "Smtp:Password", "Smtp__Password");
+    RequireSecret(adminSettings.ProvisioningKey, "Admin:ProvisioningKey", "Admin__ProvisioningKey");
 
     static void RequireSecret(string value, string configKey, string envVar)
     {
@@ -78,11 +84,13 @@ catch (Exception ex)
     jwtSettings = new JwtSettings();
     turnSettings = new TurnSettings();
     smtpSettings = new SmtpSettings { Host = "localhost" }; // SmtpClient's constructor rejects an empty host
+    adminSettings = new AdminSettings();
 }
 
 builder.Services.AddSingleton(jwtSettings);
 builder.Services.AddSingleton(turnSettings);
 builder.Services.AddSingleton(smtpSettings);
+builder.Services.AddSingleton(adminSettings);
 
 builder.Services.AddAuthentication(ApiKeyAuthenticationSchemeOptions.SchemeName)
     .AddScheme<ApiKeyAuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(
