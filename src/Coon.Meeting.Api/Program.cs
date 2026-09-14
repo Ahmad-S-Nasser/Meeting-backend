@@ -121,6 +121,7 @@ builder.Services.AddAuthentication(ApiKeyAuthenticationSchemeOptions.SchemeName)
 builder.Services.AddAuthorization();
 
 builder.Services.AddHostedService<WebhookRetryHostedService>();
+builder.Services.AddHostedService<MeetingReminderHostedService>();
 
 builder.Services.AddSignalR(options =>
 {

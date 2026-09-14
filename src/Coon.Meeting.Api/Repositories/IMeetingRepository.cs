@@ -11,4 +11,10 @@ public interface IMeetingRepository
 
     Task CreateAsync(Models.Meeting meeting);
     Task UpdateAsync(Models.Meeting meeting);
+
+    /// <summary>
+    /// Atomically claims one meeting starting within <paramref name="window"/> that hasn't had
+    /// its reminder sent yet, marking it sent in the same operation. Null when nothing is due.
+    /// </summary>
+    Task<Models.Meeting?> ClaimMeetingNeedingReminderAsync(DateTime now, TimeSpan window);
 }

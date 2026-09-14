@@ -31,4 +31,7 @@ public class MeetingRepository : IMeetingRepository
         _db.Meetings.Update(meeting);
         return Task.CompletedTask;
     }
+
+    public Task<Models.Meeting?> ClaimMeetingNeedingReminderAsync(DateTime now, TimeSpan window) =>
+        Task.FromResult(_db.ClaimMeetingNeedingReminder(now, window));
 }

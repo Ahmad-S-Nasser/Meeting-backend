@@ -39,6 +39,52 @@ public class LiteDbContext : IDisposable
     public ILiteCollection<Models.Meeting> Meetings => _db.GetCollection<Models.Meeting>("meetings");
     public ILiteCollection<WebhookDelivery> WebhookDeliveries => _db.GetCollection<WebhookDelivery>("webhookDeliveries");
 
+    /// <summary>
+    /// Atomically finds one meeting starting within <paramref name="window"/> that hasn't had
+    /// its reminder sent yet, and marks it sent in the same transaction - so a poll tick can't
+    /// claim the same meeting twice. Returns null when there's nothing due.
+    /// </summary>
+    /// <remarks>
+    /// Unlike the Mongo-backed reference (FindOneAndUpdate, safe across several API instances),
+    /// this only has to be safe within one process - the single-instance trade-off documented
+    /// at the top of the project plan. A BeginTrans/Commit pair is still used, not because two
+    /// concurrent pollers could otherwise race (there's only ever one), but because an HTTP
+    /// request resetting ReminderSentAt (MeetingsController.Update, on reschedule) could
+    /// otherwise interleave between this method's read and its write.
+    /// </remarks>
+    public Models.Meeting? ClaimMeetingNeedingReminder(DateTime now, TimeSpan window)
+    {
+        // LiteDB's LINQ-to-BsonExpression translator can't convert a method call like
+        // now.Add(window) inside the predicate - it only understands member/constant access -
+        // so the upper bound has to be a plain captured value, computed before the query.
+        var until = now.Add(window);
+
+        _db.BeginTrans();
+        try
+        {
+            var due = Meetings.Find(m =>
+                    m.Status == MeetingStatus.Scheduled &&
+                    m.ScheduledAt > now &&
+                    m.ScheduledAt <= until &&
+                    m.ReminderSentAt == null)
+                .FirstOrDefault();
+
+            if (due != null)
+            {
+                due.ReminderSentAt = now;
+                Meetings.Update(due);
+            }
+
+            _db.Commit();
+            return due;
+        }
+        catch
+        {
+            _db.Rollback();
+            throw;
+        }
+    }
+
     private void EnsureIndexes()
     {
         Tenants.EnsureIndex(t => t.ApiKeyHash, unique: true);
