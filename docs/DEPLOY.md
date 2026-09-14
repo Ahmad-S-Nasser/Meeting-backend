@@ -10,6 +10,8 @@ with the deployment and lives in source control forever:
 |---|---|---|
 | `Jwt__ParticipantKey` | `Jwt:ParticipantKey` | HS256 signing key for participant call tokens. Any long random string, e.g. `openssl rand -hex 32`. |
 | `Turn__SharedSecret` | `Turn:SharedSecret` | Shared with your coturn server's `static-auth-secret` - see below. |
+| `Smtp__Password` | `Smtp:Password` | Mailbox password/app-password for sending calendar invites. |
+| `Admin__ProvisioningKey` | `Admin:ProvisioningKey` | Gates `POST /tenants` (`scripts/create-tenant.ps1`). Any long random string - this is a shared ops credential, not per-tenant. |
 
 `Database__FilePath` is not a secret (just a local path) but is also overridable, for
 deployments that want the LiteDB file on a mounted volume instead of `data/coon-meeting.db`
