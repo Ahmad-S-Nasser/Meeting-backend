@@ -3,10 +3,12 @@ using System.Text.Json.Serialization;
 using Coon.Meeting.Api.Auth;
 using Coon.Meeting.Api.Config;
 using Coon.Meeting.Api.Hubs;
+using Coon.Meeting.Api.Middleware;
 using Coon.Meeting.Api.Models;
 using Coon.Meeting.Api.Repositories;
 using Coon.Meeting.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -128,6 +130,13 @@ builder.Services.AddAuthentication(ApiKeyAuthenticationSchemeOptions.SchemeName)
 
 builder.Services.AddAuthorization();
 
+// Per-tenant CORS: an integrator's own frontend calls this API cross-origin, and each
+// tenant's AllowedOrigins is decided at tenant-creation time, not at deploy time - a single
+// static origin list doesn't work once arbitrary third-party frontends call in.
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<ICorsPolicyProvider, DynamicCorsPolicyProvider>();
+builder.Services.AddCors();
+
 builder.Services.AddHostedService<WebhookRetryHostedService>();
 builder.Services.AddHostedService<MeetingReminderHostedService>();
 
@@ -193,6 +202,7 @@ app.Use(async (context, next) =>
     await next();
 });
 
+app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 

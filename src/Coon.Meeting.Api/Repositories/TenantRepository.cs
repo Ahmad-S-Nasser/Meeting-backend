@@ -33,4 +33,7 @@ public class TenantRepository : ITenantRepository
         _db.Tenants.Update(tenant);
         return Task.CompletedTask;
     }
+
+    public Task<List<Tenant>> GetAllAsync() =>
+        Task.FromResult(_db.Tenants.FindAll().ToList());
 }
