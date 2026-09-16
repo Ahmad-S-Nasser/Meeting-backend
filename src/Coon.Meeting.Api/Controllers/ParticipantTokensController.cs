@@ -18,11 +18,13 @@ public class ParticipantTokensController : ControllerBase
 {
     private readonly IMeetingRepository _meetings;
     private readonly IParticipantTokenService _tokens;
+    private readonly IMeetingAccessService _access;
 
-    public ParticipantTokensController(IMeetingRepository meetings, IParticipantTokenService tokens)
+    public ParticipantTokensController(IMeetingRepository meetings, IParticipantTokenService tokens, IMeetingAccessService access)
     {
         _meetings = meetings;
         _tokens = tokens;
+        _access = access;
     }
 
     [HttpPost]
@@ -34,6 +36,14 @@ public class ParticipantTokensController : ControllerBase
 
         if (meeting.Status == Models.MeetingStatus.Cancelled)
             return BadRequest(new { message = "Cannot mint a call token for a cancelled meeting." });
+
+        switch (_access.CheckAccess(meeting, dto.ParticipantExternalId))
+        {
+            case MeetingAccessResult.Blocked:
+                return StatusCode(403, new { error = "blocked", message = "This participant has been blocked from this meeting." });
+            case MeetingAccessResult.NotInvited:
+                return StatusCode(403, new { error = "not_invited", message = "This is a private meeting and this participant is not on the attendee list." });
+        }
 
         var result = _tokens.Mint(meeting, dto.ParticipantExternalId, dto.Name);
 

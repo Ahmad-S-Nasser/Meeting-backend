@@ -61,6 +61,7 @@ public class MeetingsController : ControllerBase
             DurationMinutes = dto.DurationMinutes,
             Location = dto.Location,
             MeetingLink = dto.MeetingLink,
+            Visibility = dto.Visibility ?? MeetingVisibility.Private,
             CreatedByExternalId = dto.Organizer.ExternalId,
             CreatedByName = dto.Organizer.Name,
             CreatedByEmail = dto.Organizer.Email,
@@ -102,6 +103,7 @@ public class MeetingsController : ControllerBase
         existing.DurationMinutes = dto.DurationMinutes;
         existing.Location = dto.Location;
         existing.MeetingLink = dto.MeetingLink;
+        if (dto.Visibility.HasValue) existing.Visibility = dto.Visibility.Value;
         existing.UpdatedAt = DateTime.UtcNow;
 
         // A time change means the "starting soon" reminder needs to fire again for the new time.

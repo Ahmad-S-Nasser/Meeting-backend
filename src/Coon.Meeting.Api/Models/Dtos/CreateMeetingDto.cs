@@ -1,10 +1,14 @@
 using System.ComponentModel.DataAnnotations;
+using Coon.Meeting.Api.Models;
 
 namespace Coon.Meeting.Api.Models.Dtos;
 
 public class CreateMeetingDto
 {
     public string? ExternalRef { get; set; }
+
+    /// <summary>Null defaults to Private in the controller.</summary>
+    public MeetingVisibility? Visibility { get; set; }
 
     [Required]
     public string Title { get; set; } = string.Empty;

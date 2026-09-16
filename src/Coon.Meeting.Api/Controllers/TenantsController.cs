@@ -35,17 +35,57 @@ public class TenantsController : ControllerBase
         var tenant = await _tenants.GetByIdAsync(TenantContext.TenantId(User));
         if (tenant == null) return NotFound();
 
-        return Ok(new TenantSelfDto
-        {
-            Id = tenant.Id,
-            Name = tenant.Name,
-            ApiKeyPrefix = tenant.ApiKeyPrefix,
-            WebhookUrl = tenant.WebhookUrl,
-            AllowedOrigins = tenant.AllowedOrigins,
-            Status = tenant.Status,
-            CreatedAt = tenant.CreatedAt,
-        });
+        return Ok(ToSelfDto(tenant));
     }
+
+    // PUT /api/v1/tenants/me - self-service update, gated by the caller's own ApiKey (the
+    // hash lookup in ApiKeyAuthenticationHandler can only ever resolve the calling
+    // tenant's own row, so this is inherently scoped to "your own tenant", no extra check
+    // needed beyond the scheme itself).
+    [HttpPut("me")]
+    public async Task<ActionResult<TenantSelfDto>> UpdateSelf([FromBody] UpdateTenantSelfDto dto)
+    {
+        var tenant = await _tenants.GetByIdAsync(TenantContext.TenantId(User));
+        if (tenant == null) return NotFound();
+
+        if (dto.Name is not null) tenant.Name = dto.Name;
+
+        if (dto.WebhookUrl is not null)
+        {
+            if (dto.WebhookUrl.Length == 0)
+            {
+                tenant.WebhookUrl = null;
+            }
+            else
+            {
+                if (!Uri.TryCreate(dto.WebhookUrl, UriKind.Absolute, out _))
+                    return BadRequest(new { message = "WebhookUrl must be a valid absolute URL." });
+                tenant.WebhookUrl = dto.WebhookUrl;
+            }
+        }
+
+        if (dto.WebhookSecret is not null)
+            tenant.WebhookSecret = dto.WebhookSecret.Length == 0 ? null : dto.WebhookSecret;
+
+        if (dto.AllowedOrigins is not null)
+            tenant.AllowedOrigins = dto.AllowedOrigins;
+
+        tenant.UpdatedAt = DateTime.UtcNow;
+        await _tenants.UpdateAsync(tenant);
+
+        return Ok(ToSelfDto(tenant));
+    }
+
+    private static TenantSelfDto ToSelfDto(Tenant tenant) => new()
+    {
+        Id = tenant.Id,
+        Name = tenant.Name,
+        ApiKeyPrefix = tenant.ApiKeyPrefix,
+        WebhookUrl = tenant.WebhookUrl,
+        AllowedOrigins = tenant.AllowedOrigins,
+        Status = tenant.Status,
+        CreatedAt = tenant.CreatedAt,
+    };
 
     // POST /api/v1/tenants - ops-only provisioning, not part of the tenant-facing API surface.
     // No tenant exists yet to hold an ApiKey against, so this can't use the ApiKey scheme the

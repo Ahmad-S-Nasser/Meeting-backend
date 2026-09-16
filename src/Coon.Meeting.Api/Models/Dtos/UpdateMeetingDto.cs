@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Coon.Meeting.Api.Models;
 
 namespace Coon.Meeting.Api.Models.Dtos;
 
@@ -12,6 +13,9 @@ public class UpdateMeetingDto
     public string Title { get; set; } = string.Empty;
 
     public string? Description { get; set; }
+
+    /// <summary>Null leaves the meeting's current Visibility unchanged.</summary>
+    public MeetingVisibility? Visibility { get; set; }
 
     [Required]
     public DateTime ScheduledAt { get; set; }

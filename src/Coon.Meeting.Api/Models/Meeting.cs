@@ -31,6 +31,13 @@ public class Meeting
     public string? CreatedByEmail { get; set; }
 
     public MeetingStatus Status { get; set; } = MeetingStatus.Scheduled;
+
+    public MeetingVisibility Visibility { get; set; } = MeetingVisibility.Private;
+
+    /// <summary>External ids force-disconnected and permanently barred from rejoining this
+    /// meeting - checked by IMeetingAccessService regardless of Visibility.</summary>
+    public List<string> BlockedParticipantIds { get; set; } = new();
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 

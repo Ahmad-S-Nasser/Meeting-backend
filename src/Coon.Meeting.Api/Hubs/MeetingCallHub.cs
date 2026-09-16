@@ -1,21 +1,13 @@
-using System.Collections.Concurrent;
 using Coon.Meeting.Api.Auth;
 using Coon.Meeting.Api.Helpers;
 using Coon.Meeting.Api.Models;
+using Coon.Meeting.Api.Realtime;
 using Coon.Meeting.Api.Repositories;
 using Coon.Meeting.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Coon.Meeting.Api.Hubs;
-
-/// <summary>One connection's identity within a call room, as sent to a newly-joining peer.</summary>
-public class CallParticipant
-{
-    public string ConnectionId { get; set; } = string.Empty;
-    public string ParticipantId { get; set; } = string.Empty;
-    public string Name { get; set; } = string.Empty;
-}
 
 /// <summary>
 /// WebRTC signaling for a meeting's call. Relays SDP offers/answers and ICE candidates between
@@ -27,21 +19,15 @@ public class MeetingCallHub : Hub
 {
     private readonly IMeetingRepository _meetings;
     private readonly IWebhookDispatcher _webhooks;
+    private readonly IMeetingRoomRegistry _registry;
+    private readonly IMeetingAccessService _access;
 
-    // SignalR groups don't expose their own membership, so call rooms are tracked here:
-    // meetingId -> (connectionId -> participant). Needed both to hand a joining peer the list
-    // of who's already in the room, and to notify the room on a dropped connection
-    // (OnDisconnectedAsync) without the client having called LeaveCall first.
-    private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, CallParticipant>> Rooms = new();
-
-    // connectionId -> meetingId, so OnDisconnectedAsync knows which room to clean up without
-    // the caller having to pass it in (a disconnect carries no arguments).
-    private static readonly ConcurrentDictionary<string, string> ConnectionMeetingIds = new();
-
-    public MeetingCallHub(IMeetingRepository meetings, IWebhookDispatcher webhooks)
+    public MeetingCallHub(IMeetingRepository meetings, IWebhookDispatcher webhooks, IMeetingRoomRegistry registry, IMeetingAccessService access)
     {
         _meetings = meetings;
         _webhooks = webhooks;
+        _registry = registry;
+        _access = access;
     }
 
     /// <summary>
@@ -66,39 +52,40 @@ public class MeetingCallHub : Hub
 
         var participantId = TenantContext.ParticipantId(Context.User!);
         var name = Context.User!.FindFirst("name")?.Value ?? "Participant";
-        var self = new CallParticipant { ConnectionId = Context.ConnectionId, ParticipantId = participantId, Name = name };
 
-        var room = Rooms.GetOrAdd(meetingId, _ => new ConcurrentDictionary<string, CallParticipant>());
+        // Re-checked here, not just at token-mint time: a token minted before a block took
+        // effect (or before an attendee was removed) is still a technically-valid JWT - this
+        // is what actually keeps a blocked/uninvited id out of the room, not just out of a
+        // fresh mint.
+        var access = _access.CheckAccess(meeting, participantId);
+        if (access != MeetingAccessResult.Allowed)
+        {
+            await Clients.Caller.SendAsync("AccessDenied", new { reason = access == MeetingAccessResult.Blocked ? "blocked" : "not_invited" });
+            return;
+        }
 
-        // Snapshot taken BEFORE adding this connection, so the new joiner doesn't see itself in
-        // its own "who's already here" list.
-        var existingParticipants = room.Values.ToList();
-
-        room[Context.ConnectionId] = self;
-        ConnectionMeetingIds[Context.ConnectionId] = meetingId;
+        var existingParticipants = _registry.AddParticipant(meetingId, Context.ConnectionId, participantId, name);
         await Groups.AddToGroupAsync(Context.ConnectionId, meetingId);
 
         // Convention: the new joiner always initiates the WebRTC offer to each existing member,
         // never the reverse - avoids a double-offer glare condition between two peers
         // negotiating at once, with no tie-breaker needed.
         await Clients.Caller.SendAsync("ExistingParticipants", existingParticipants);
-        await Clients.OthersInGroup(meetingId).SendAsync("ParticipantJoined", self.ConnectionId, self.ParticipantId, self.Name);
+        await Clients.OthersInGroup(meetingId).SendAsync("ParticipantJoined", Context.ConnectionId, participantId, name);
 
         await _webhooks.DispatchAsync(meeting.TenantId, WebhookEventTypes.ParticipantJoined, new
         {
             meetingId,
-            connectionId = self.ConnectionId,
-            participantId = self.ParticipantId,
-            name = self.Name,
+            connectionId = Context.ConnectionId,
+            participantId,
+            name,
         });
     }
 
     public async Task LeaveCall(string meetingId)
     {
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, meetingId);
-        var self = RemoveFromRoom(meetingId);
-
-        await Clients.Group(meetingId).SendAsync("ParticipantLeft", Context.ConnectionId);
+        var (_, self) = _registry.RemoveParticipant(Context.ConnectionId);
+        await MeetingCallBroadcastHelper.RemoveAndBroadcastLeaveAsync(Groups, Clients, Context.ConnectionId, meetingId);
         await DispatchParticipantLeftAsync(meetingId, self);
     }
 
@@ -130,28 +117,14 @@ public class MeetingCallHub : Hub
     {
         // A dropped tab must still tell the room to tear down that one peer connection, or the
         // other participants are left staring at a frozen video tile.
-        if (ConnectionMeetingIds.TryGetValue(Context.ConnectionId, out var meetingId))
+        var (meetingId, self) = _registry.RemoveParticipant(Context.ConnectionId);
+        if (meetingId != null)
         {
-            var self = RemoveFromRoom(meetingId);
-            await Clients.Group(meetingId).SendAsync("ParticipantLeft", Context.ConnectionId);
+            await MeetingCallBroadcastHelper.RemoveAndBroadcastLeaveAsync(Groups, Clients, Context.ConnectionId, meetingId);
             await DispatchParticipantLeftAsync(meetingId, self);
         }
 
         await base.OnDisconnectedAsync(exception);
-    }
-
-    private CallParticipant? RemoveFromRoom(string meetingId)
-    {
-        ConnectionMeetingIds.TryRemove(Context.ConnectionId, out _);
-
-        CallParticipant? removed = null;
-        if (Rooms.TryGetValue(meetingId, out var room))
-        {
-            room.TryRemove(Context.ConnectionId, out removed);
-            if (room.IsEmpty) Rooms.TryRemove(meetingId, out _);
-        }
-
-        return removed;
     }
 
     private Task DispatchParticipantLeftAsync(string meetingId, CallParticipant? self)
