@@ -113,6 +113,46 @@ public class MeetingCallHub : Hub
         await Clients.OthersInGroup(meetingId).SendAsync("MediaStateChanged", Context.ConnectionId, micOn, cameraOn);
     }
 
+    /// <summary>
+    /// Pure liveness broadcast, same shape as UpdateMediaState - tells the room "my next
+    /// renegotiated video track is a screen share, not a second camera." The actual screen
+    /// track itself is added to the existing per-peer RTCPeerConnection and renegotiated over
+    /// the SendOffer/SendAnswer path already above; nothing about that path needed to change.
+    /// </summary>
+    public async Task UpdateScreenShareState(string meetingId, bool isSharing)
+    {
+        if (!ClaimMatchesRoom(meetingId)) throw new HubException("Not authorized for this meeting.");
+        await Clients.OthersInGroup(meetingId).SendAsync("ScreenShareStateChanged", Context.ConnectionId, isSharing);
+    }
+
+    /// <summary>
+    /// Call-scoped and ephemeral by design, same trust model as every other broadcast here - no
+    /// registry/DB write, so there is no history endpoint and a reconnecting or late-joining
+    /// participant sees nothing sent before they arrived.
+    /// </summary>
+    public async Task SendChatMessage(string meetingId, string text)
+    {
+        if (!ClaimMatchesRoom(meetingId)) throw new HubException("Not authorized for this meeting.");
+        if (string.IsNullOrWhiteSpace(text)) return;
+        if (text.Length > 2000) throw new HubException("Message too long.");
+
+        var participantId = TenantContext.ParticipantId(Context.User!);
+        var name = Context.User!.FindFirst("name")?.Value ?? "Participant";
+        await Clients.OthersInGroup(meetingId).SendAsync("ReceiveChatMessage", Context.ConnectionId, participantId, name, text, DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>
+    /// Same pure-liveness-broadcast shape as UpdateMediaState/UpdateScreenShareState - this is
+    /// the actual consent notice a recording is required to give every participant, not just a
+    /// UI nicety. Recording itself is entirely client-side (composited by whichever participant
+    /// started it); Coon.Meeting never touches the recorded media and has no storage for it.
+    /// </summary>
+    public async Task UpdateRecordingState(string meetingId, bool isRecording)
+    {
+        if (!ClaimMatchesRoom(meetingId)) throw new HubException("Not authorized for this meeting.");
+        await Clients.OthersInGroup(meetingId).SendAsync("RecordingStateChanged", Context.ConnectionId, isRecording);
+    }
+
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         // A dropped tab must still tell the room to tear down that one peer connection, or the
