@@ -430,18 +430,38 @@ import { CallRoom } from "coon-meeting-sdk";
   participantName={displayName}
   onLeave={() => navigate("/meetings/" + meetingId)}
 
+  // Required - not optional. Recording can't be wired up without also deciding where the
+  // finished file goes; Coon.Meeting never stores it for you.
+  onRecordingAvailable={(blob, meta) => uploadToMyOwnStorage(blob, meta)}
+
   // Optional: only render Kick/Block controls for the meeting's organizer.
   // The SDK never calls your backend itself - it just exposes the hooks.
   isHost={isOrganizer}
   onKickParticipant={(participantId) => api.kick(meetingId, participantId)}
   onBlockParticipant={(participantId) => api.block(meetingId, participantId)}
+
+  // Optional: who may share a screen / record. Decided by YOUR app (typically from your own
+  // per-meeting settings); the SDK shows/hides the buttons and stops a share or recording that
+  // is already running if a flag flips to false. Defaults: canShareScreen = true, canRecord = isHost.
+  canShareScreen={permissions.canShareScreen}
+  canRecord={permissions.canRecord}
+
+  // Optional: adds a "Copy invite link" button for every participant. You return the URL.
+  getInviteLink={() => api.inviteLink(meetingId).then((r) => r.url)}
 />
 ```
 
 `CallRoom` handles local media capture, one `RTCPeerConnection` per remote participant, TURN
-credential fetching, a per-participant volume slider, and mic/camera toggles. It renders
-nothing about your product's identity or permissions model — `isHost` and the two callbacks are
-the entire surface for wiring in your own moderation UI.
+credential fetching, mic/camera/device switching, a live connection-quality indicator, an
+adaptive tile grid with pinning, screen sharing, in-call chat, and recording. It renders nothing
+about your product's identity or permissions model — `isHost` and the callbacks above are the
+entire surface for wiring in your own backend calls.
+
+`canShareScreen`/`canRecord` are UI-level controls, the same trust model as the Kick/Block buttons:
+calls are peer-to-peer, so the server cannot physically stop a modified client from sharing or
+recording. They decide who is *offered* the capability. `getInviteLink` should only ever hand out a
+link you are happy for any participant to pass on — mint per-person or organizer-only links on your
+own backend, and return something an attendee may freely share.
 
 ### The signaling protocol, if you're building your own UI
 
@@ -479,9 +499,12 @@ product needs persisted chat history, that's a decision to make at your own inte
 peer-to-peer (see the hub's own doc comment above - audio/video never touches this server), so
 there is no server-side point to capture a canonical recording from. `coon-meeting-sdk`'s
 `CallRoom` instead composites whatever the *recording participant's own browser* can see/hear
-(local + every connected peer's audio, and their video tiles if requested) into one file
-client-side, then hands it to your app via a **required** `onRecordingAvailable` callback - your
-app must persist that file to real storage; Coon.Meeting never stores or transcribes it.
+(local + every connected peer's audio, plus video by default — a grid of everyone's tiles, or the
+active screen share with the participants in a strip beside it) into one file client-side. It
+prefers MP4 (plays in ordinary desktop players and transcription tools, and is seekable) and falls
+back to WebM on browsers that can't record MP4. It then hands the file to your app via a
+**required** `onRecordingAvailable` callback - your app must persist that file to real storage;
+Coon.Meeting never stores or transcribes it.
 `UpdateRecordingState`/`RecordingStateChanged` is the consent-notice broadcast every participant's
 client uses to show "this call is being recorded," not a signal that touches any media. A real
 accepted limitation of this design: the recording only lasts as long as the recording
@@ -598,6 +621,8 @@ integration.
 | "Get shareable link" (Any meeting) | A reusable, unauthenticated join link that mints a fresh guest external id per visitor |
 | "Invite someone" (Private meeting, after creation) | `POST .../attendees` first, then a one-person scoped join link — the same mechanism creation now triggers automatically per attendee |
 | Organizer clicks Kick/Block on a tile | Forwards to Coon.Meeting's moderation endpoints, asserting the session's own user id as `requestedByExternalId` |
+| Organizer sets who may share a screen / record | Nothing — Coon.Meeting has no notion of it. The Dashboard stores a per-meeting policy in its own database (Only me / Selected attendees / Everyone), resolves it per caller when it mints a call token (and re-checks every ~30s during the call), and passes the result to the SDK as `canShareScreen`/`canRecord` |
+| An attendee clicks "Copy invite link" | Also nothing on Coon.Meeting's side. The Dashboard only ever *reads* an existing link: the reusable guest link if the organizer already created one for an Any meeting, otherwise the meeting page URL (which only invited people can open). Only the organizer mints guest links |
 
 ### The one access-model decision worth calling out
 
