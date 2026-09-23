@@ -19,6 +19,8 @@ namespace Coon.Meeting.Api.Controllers;
 [Authorize(AuthenticationSchemes = ApiKeyAuthenticationSchemeOptions.SchemeName)]
 public class ParticipantModerationController : ControllerBase
 {
+    private static readonly HashSet<string> AllowedCapabilities = new(StringComparer.Ordinal) { "screenShare", "record" };
+
     private readonly IMeetingRepository _meetings;
     private readonly IMeetingCallModerationService _moderation;
 
@@ -73,6 +75,25 @@ public class ParticipantModerationController : ControllerBase
             await _meetings.UpdateAsync(meeting);
         }
 
+        return NoContent();
+    }
+
+    // POST /api/v1/meetings/{meetingId}/participants/{participantExternalId}/capabilities -
+    // live, in-call push of a screen-share/recording grant to this one participant's own
+    // connection(s). Not a disconnect: the participant stays in the call and stays in the
+    // group; this only changes what their own client currently allows them to do. A no-op if
+    // they're not currently connected (nothing to push to right now) - it still succeeds, and
+    // the grant is remembered so it's echoed back if/when they (re)join.
+    [HttpPost("capabilities")]
+    public async Task<IActionResult> SetCapability(string meetingId, string participantExternalId, [FromBody] CapabilityChangeRequestDto dto)
+    {
+        if (!AllowedCapabilities.Contains(dto.Capability))
+            return BadRequest(new { error = "invalid_capability" });
+
+        var (meeting, error) = await LoadAndAuthorizeAsync(meetingId, dto.RequestedByExternalId);
+        if (error != null) return error;
+
+        await _moderation.PushCapabilityChangeAsync(meetingId, participantExternalId, dto.Capability, dto.Allowed);
         return NoContent();
     }
 

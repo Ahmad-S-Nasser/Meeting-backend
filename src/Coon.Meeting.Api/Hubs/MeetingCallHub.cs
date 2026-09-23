@@ -21,13 +21,15 @@ public class MeetingCallHub : Hub
     private readonly IWebhookDispatcher _webhooks;
     private readonly IMeetingRoomRegistry _registry;
     private readonly IMeetingAccessService _access;
+    private readonly ICallCapabilityGrantStore _grants;
 
-    public MeetingCallHub(IMeetingRepository meetings, IWebhookDispatcher webhooks, IMeetingRoomRegistry registry, IMeetingAccessService access)
+    public MeetingCallHub(IMeetingRepository meetings, IWebhookDispatcher webhooks, IMeetingRoomRegistry registry, IMeetingAccessService access, ICallCapabilityGrantStore grants)
     {
         _meetings = meetings;
         _webhooks = webhooks;
         _registry = registry;
         _access = access;
+        _grants = grants;
     }
 
     /// <summary>
@@ -72,6 +74,15 @@ public class MeetingCallHub : Hub
         // negotiating at once, with no tie-breaker needed.
         await Clients.Caller.SendAsync("ExistingParticipants", existingParticipants);
         await Clients.OthersInGroup(meetingId).SendAsync("ParticipantJoined", Context.ConnectionId, participantId, name);
+
+        // Echoes any live-call capability grant this participant already had before this
+        // connection existed (a fresh tab, a reconnect after a drop, ...) - the grant itself
+        // lives in ICallCapabilityGrantStore, not the room registry, precisely so it survives
+        // this. Same "CapabilityChanged" event a live push uses, just replayed on join.
+        foreach (var (capability, allowed) in _grants.GetGrants(meetingId, participantId))
+        {
+            await Clients.Caller.SendAsync("CapabilityChanged", new { capability, allowed });
+        }
 
         await _webhooks.DispatchAsync(meeting.TenantId, WebhookEventTypes.ParticipantJoined, new
         {

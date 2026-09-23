@@ -398,6 +398,37 @@ re-checked live, not just at mint time.
 > the signaling connection so it can show its own "removed from call" state and tear down its
 > media — see [Real-time calling](#real-time-calling--the-sdk).
 
+### Live capability grants
+
+*Also organizer-only — but unlike Kick/Block, this never disconnects anyone.*
+
+**POST** `/api/v1/meetings/{meetingId}/participants/{participantExternalId}/capabilities` — `ApiKey`
+
+```json
+{ "requestedByExternalId": "user_882", "capability": "screenShare", "allowed": true }
+```
+
+`capability` must be `"screenShare"` or `"record"` — anything else is `400 {"error":"invalid_capability"}`.
+`requestedByExternalId` is checked the same way as Kick/Block (must equal the meeting's
+`CreatedByExternalId`). On success: `204 No Content`, same as Kick/Block/Unblock.
+
+This grants or revokes one specific participant's screen-share/recording right **live, during
+an ongoing call** — a targeted push to that one participant's own connection, not a room-wide
+announcement and not a disconnect; the participant stays in the call and in the group. Their
+client receives a `CapabilityChanged` push (`{ capability, allowed }`) over the signaling
+connection and is expected to enforce it locally (stop an in-progress share/recording if
+`allowed` just became `false`) — same client-side trust model as every other moderation action
+here.
+
+> **Note:** If the participant isn't currently connected to the call (hasn't joined yet, or
+> dropped), this is a silent no-op for the push — the REST call still returns `204`, there's
+> just no live connection to send to. The grant itself is still remembered for the rest of the
+> call: if that participant (re)joins afterward, `JoinCall` replays the same `CapabilityChanged`
+> event to them so a grant survives a reconnect. That memory is call-session-only (in-memory,
+> same as the room registry) — it's gone once the process restarts or the call ends, and it does
+> **not** change the pre-meeting share/record policy (`canShareScreen`/`canRecord` at token-mint
+> time); it's a live override on top of that baseline, for this call only.
+
 ## Calendar
 
 *RFC 5545, with UTC times and correct line-folding.*
@@ -477,7 +508,7 @@ the participant token:
 | `UpdateScreenShareState(isSharing)` | `ScreenShareStateChanged` |
 | `SendChatMessage(text)` | `ReceiveChatMessage` |
 | `UpdateRecordingState(isRecording)` | `RecordingStateChanged` |
-| — | `Kicked`, `Blocked` |
+| — | `Kicked`, `Blocked`, `CapabilityChanged` |
 
 Convention: whoever joins second always initiates the SDP offer to everyone already in the
 room — this avoids a double-offer race with no tie-breaker needed. If you write your own client

@@ -33,6 +33,7 @@ builder.Services.AddSingleton<IApiKeyService, ApiKeyService>();
 builder.Services.AddSingleton<IParticipantTokenService, ParticipantTokenService>();
 builder.Services.AddSingleton<IMeetingAccessService, MeetingAccessService>();
 builder.Services.AddSingleton<Coon.Meeting.Api.Realtime.IMeetingRoomRegistry, Coon.Meeting.Api.Realtime.MeetingRoomRegistry>();
+builder.Services.AddSingleton<Coon.Meeting.Api.Realtime.ICallCapabilityGrantStore, Coon.Meeting.Api.Realtime.CallCapabilityGrantStore>();
 builder.Services.AddSingleton<IMeetingCallModerationService, MeetingCallModerationService>();
 builder.Services.AddSingleton<IWebhookDispatcher, WebhookDispatcher>();
 builder.Services.AddSingleton<IIcsBuilder, IcsBuilder>();

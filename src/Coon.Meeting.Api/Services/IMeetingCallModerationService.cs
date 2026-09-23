@@ -14,4 +14,15 @@ public interface IMeetingCallModerationService
     /// actually in the call).
     /// </summary>
     Task<int> ForceDisconnectAsync(string meetingId, string participantExternalId, string eventName, string? reason);
+
+    /// <summary>
+    /// Pushes a live "CapabilityChanged" event ({ capability, allowed }) to every live
+    /// connection for this participant in this meeting - unlike ForceDisconnectAsync, this
+    /// never touches the registry or group membership, so the participant stays in the call.
+    /// Also records the grant so a later reconnect (MeetingCallHub.JoinCall) can echo it back,
+    /// since the registry itself only tracks live connections, not what was granted. A no-op,
+    /// not an error, if the participant has no live connection right now - the REST call still
+    /// succeeds, there's just nothing to push to yet.
+    /// </summary>
+    Task PushCapabilityChangeAsync(string meetingId, string participantExternalId, string capability, bool allowed);
 }
